@@ -18,14 +18,14 @@ export default function RegistrationSuccessPage() {
 
   return (
     <section className="panel-page success-page">
-      <PageHeader title="Identity OS - Registration Submitted" onBack={() => setView('home')} />
+      <PageHeader title="Identity OS - Organization Registered" onBack={() => setView('home')} />
       <div className="success-box">
-        <div className="success-status">Submitted successfully</div>
-        <h2>Organization registration request created</h2>
+        <div className="success-status">Registered successfully</div>
+        <h2>Your organization workspace is ready</h2>
         <div className="org-id-box">
           <span>Organization ID</span>
           <div className="org-id-copy-row"><strong>{orgId || '-'}</strong><button type="button" className="secondary-button" onClick={copyOrgId} disabled={!orgId}>{copied ? 'Copied' : 'Copy'}</button></div>
-          <small>Use this ID as the organization admin username. The one-time password has also been sent to the official email and is the same as this organization ID.</small>
+          <small>Use this ID as the organization admin username. The one-time password has been sent to the official email and is the same as this organization ID.</small>
         </div>
         <div className="meta-row"><div><label>Created</label><p>{successData?.createdAt || '-'}</p></div><div><label>Status</label><p>{successData?.status || '-'}</p></div>{successData?.officialEmail && <div><label>Official Email</label><p>{successData.officialEmail}</p></div>}</div>
       </div>

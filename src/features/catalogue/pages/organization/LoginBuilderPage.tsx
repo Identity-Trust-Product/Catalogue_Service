@@ -20,7 +20,6 @@ const authOptions = [
 ]
 
 const schemaEndpointHint = 'Schema API is not available on the running backend. Restart onboarding-and-identity-service with the latest code, then submit again.'
-const filters = ['All', 'Pending', 'Approved', 'Rejected']
 
 const buildLoginFields = (methods: string[]) => {
   if (methods.includes('EMAIL_PASSWORD')) {
@@ -76,7 +75,6 @@ export default function LoginBuilderPage() {
   const [policyName, setPolicyName] = useState(() => readStorage('catalogue_login_builder_policy_name') || `Login Policy ${new Date().toLocaleDateString()}`)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-  const [statusFilter, setStatusFilter] = useState('All')
   const [newStep, setNewStep] = useState('')
   const [schemaHistory, setSchemaHistory] = useState<SchemaRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -85,8 +83,7 @@ export default function LoginBuilderPage() {
   useEffect(() => { refreshCatalogueData?.() }, [])
   useEffect(() => { if (!selectedAppId && orgApps[0]?.id) setSelectedAppId(orgApps[0].id) }, [orgApps, selectedAppId])
 
-  const loginSchemas = schemaHistory
-  const filteredLoginSchemas = loginSchemas.filter((schema: any) => statusFilter === 'All' || schema.status === statusFilter.toLowerCase())
+  const loginSchemas = schemaHistory.filter((schema) => !selectedAppId || schema.appId === selectedAppId)
   const selectedApp = orgApps.find((app) => app.id === selectedAppId)
   const loginFields = useMemo(() => buildLoginFields(selectedMethods), [selectedMethods])
   const policyJson = {
@@ -157,14 +154,13 @@ export default function LoginBuilderPage() {
         schemaName: policyName,
         schemaJson: policyJson,
         configurationJson: { renderer: 'hosted-identity-os-login', versionedBy: 'organization-admin' },
-        changeSummary: submitForApproval ? 'Submitted login page configuration for approval' : 'Saved login page draft',
+        changeSummary: submitForApproval ? 'Published login page configuration' : 'Saved login page draft',
         submitForApproval,
       })
       await refreshCatalogueData?.()
       await loadLoginHistory()
       localStorage.setItem('catalogue_login_builder_policy_name', policyName)
-      setStatusFilter(submitForApproval ? 'Pending' : 'All')
-      setMessage(submitForApproval ? 'Login configuration submitted for platform approval.' : 'Login configuration draft saved.')
+      setMessage(submitForApproval ? 'Login configuration published and ready for hosted login.' : 'Login configuration draft saved.')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unable to save login configuration.'
       setMessage(errorMessage.includes('/schemas') || errorMessage.includes('404') ? schemaEndpointHint : errorMessage)
@@ -184,16 +180,16 @@ export default function LoginBuilderPage() {
               <span className="eyebrow">Hosted login configuration</span>
               <h2>Login Configuration Builder</h2>
               <p>Define how Identity OS authenticates users before redirecting back to the third-party application with an access token.</p>
-              <span className="status-pill-ui status-pending builder-approval-pill"><AdminIcon name="pending" />Platform approval required</span>
+              <span className="status-pill-ui status-approved builder-approval-pill"><AdminIcon name="check" />Self-hosted publishing</span>
             </div>
             <div className="schema-builder-actions">
               <button className="secondary-button icon-text-button" disabled={saving} onClick={() => submitLoginSchema(false)}><AdminIcon name="schema" />Save Draft</button>
-              <button className="primary-button icon-text-button" disabled={saving} onClick={() => submitLoginSchema(true)}><AdminIcon name="check" />Submit for Approval</button>
+              <button className="primary-button icon-text-button" disabled={saving} onClick={() => submitLoginSchema(true)}><AdminIcon name="check" />Publish</button>
               <button className="secondary-button icon-text-button" onClick={openCurrentPreview}><AdminIcon name="view" />Login Form Preview</button>
             </div>
           </div>
 
-          {!orgApps.length && <div className="builder-message warning">No approved application is available. Approve an application first, then create its login configuration.</div>}
+          {!orgApps.length && <div className="builder-message warning">No active application is available. Register an application first, then create its login configuration.</div>}
           <div className="schema-config-strip login-config-strip">
             <label>Application<select value={selectedAppId} onChange={(event) => setSelectedAppId(event.target.value)}><option value="">Select application</option>{orgApps.map((app) => <option key={app.id} value={app.id}>{app.name} - {app.id}</option>)}</select></label>
             <label>Policy Name<input value={policyName} onChange={(event) => { setPolicyName(event.target.value); localStorage.setItem('catalogue_login_builder_policy_name', event.target.value) }} /></label>
@@ -247,14 +243,13 @@ export default function LoginBuilderPage() {
 
           <section className="schema-history-panel">
             <div className="panel-heading"><h3>Login Configurations</h3><span>{historyLoading ? 'Loading versions...' : `${loginSchemas.length} versions`}</span></div>
-            <div className="tab-row">{filters.map((filter) => <button key={filter} type="button" className={`tab ${statusFilter === filter ? 'active' : ''}`} onClick={() => setStatusFilter(filter)}>{filter}</button>)}</div>
             <div className="schema-status-list">
-              {filteredLoginSchemas.length ? filteredLoginSchemas.map((schema: any) => (
+              {loginSchemas.length ? loginSchemas.map((schema: any) => (
                 <article key={schema.versionId || schema.id} className="schema-status-card">
                   <div><div className="approval-name-row"><strong>{schema.name}</strong><span className={`status-pill-ui status-${schema.status}`}><AdminIcon name={schema.status === 'approved' ? 'check' : schema.status === 'rejected' ? 'rejected' : 'pending'} />{schema.status}</span></div><p>{schema.appName || schema.appId || 'Application'} - Version {schema.versionNumber || 1}{schema.changeSummary ? ` - ${schema.changeSummary}` : ''}</p></div>
                   <div className="schema-card-actions"><button type="button" className="ghost-button icon-text-button" onClick={() => openHistoryPreview(schema)}><AdminIcon name="view" />Preview Login</button><small>{schema.createdAt}</small></div>
                 </article>
-              )) : <div className="empty-state">No login configurations found for this filter.</div>}
+              )) : <div className="empty-state">No login configurations found for this application.</div>}
             </div>
           </section>
         </section>

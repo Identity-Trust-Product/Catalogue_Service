@@ -472,9 +472,9 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
           <div><h1>{currentMode === 'register' ? 'Create account' : 'Sign in'}</h1><p>{app?.name || 'Unknown application'}</p></div>
         </div>
         {!app && <div className="hosted-warning">Application not found. Use application id like <code>app_xxxxx</code>, or keep the generated client id available in Identity OS state.</div>}
-        {app && app.status !== 'approved' && <div className="hosted-warning">This application is not approved yet.</div>}
-        {app && currentMode === 'register' && !registrationSchema && <div className="hosted-warning">No approved registration schema found for this application. Ask the organization admin to submit and approve a registration schema.</div>}
-        {app && currentMode === 'login' && !loginSchema && <div className="hosted-warning">No approved login configuration found for this application. Ask the organization admin to submit and approve a login configuration.</div>}
+        {app && app.status !== 'approved' && <div className="hosted-warning">This application is not active yet.</div>}
+        {app && currentMode === 'register' && !registrationSchema && <div className="hosted-warning">No published registration schema found for this application. Ask the organization admin to publish a registration schema.</div>}
+        {app && currentMode === 'login' && !loginSchema && <div className="hosted-warning">No published login configuration found for this application. Ask the organization admin to publish a login configuration.</div>}
         {fieldsMissing && <div className="hosted-warning">Login configuration does not define renderable fields. Re-submit this login configuration so Identity OS stores loginFields for this application.</div>}
         {message && <div className={messageTone === 'success' ? 'hosted-success' : 'hosted-error'}>{message}</div>}
         <form className="hosted-form" onSubmit={(event) => { event.preventDefault(); submit() }}>

@@ -11,7 +11,6 @@ import { useCatalogue } from '../../context/CatalogueContext'
 
 const fieldTypes = ['text', 'email', 'phone', 'password', 'date', 'dropdown', 'checkbox', 'address', 'file', 'gov-id', 'custom']
 const schemaEndpointHint = 'Schema API is not available on the running backend. Restart onboarding-and-identity-service with the latest code, then submit again.'
-const filters = ['All', 'Pending', 'Approved', 'Rejected']
 const sensitiveFieldNames = new Set(['aadhaar', 'aadhar', 'pan', 'passport', 'voter_id', 'driving_license', 'biometric', 'date_of_birth', 'dob', 'address'])
 
 const parseDropdownOptions = (value: string) => value
@@ -101,7 +100,6 @@ export default function RegistrationBuilderPage() {
   const [selectedAppId, setSelectedAppId] = useState(() => orgApps[0]?.id || '')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-  const [statusFilter, setStatusFilter] = useState('All')
   const [schemaHistory, setSchemaHistory] = useState<SchemaRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [previewSchema, setPreviewSchema] = useState<{ title: string; appName?: string; fields: RegistrationField[]; version?: string; status?: string; createdAt?: string } | null>(null)
@@ -160,14 +158,13 @@ export default function RegistrationBuilderPage() {
         schemaName,
         schemaJson,
         configurationJson,
-        changeSummary: submitForApproval ? 'Submitted registration page schema for approval' : 'Saved registration page draft',
+        changeSummary: submitForApproval ? 'Published registration page schema' : 'Saved registration page draft',
         submitForApproval,
       })
       await refreshCatalogueData?.()
       await loadRegistrationHistory()
       localStorage.setItem('registration_builder_schema_name', schemaName)
-      setStatusFilter(submitForApproval ? 'Pending' : 'All')
-      setMessage(submitForApproval ? 'Registration schema submitted for platform approval.' : 'Registration schema draft saved.')
+      setMessage(submitForApproval ? 'Registration schema published and ready for hosted registration.' : 'Registration schema draft saved.')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unable to save schema.'
       setMessage(errorMessage.includes('/schemas') || errorMessage.includes('404') ? schemaEndpointHint : errorMessage)
@@ -175,7 +172,7 @@ export default function RegistrationBuilderPage() {
       setSaving(false)
     }
   }
-  const filteredRegistrationSchemas = schemaHistory.filter((schema) => statusFilter === 'All' || schema.status === statusFilter.toLowerCase())
+  const registrationSchemas = schemaHistory.filter((schema) => !selectedAppId || schema.appId === selectedAppId)
   const selectedAppName = orgApps.find((app) => app.id === selectedAppId)?.name || selectedAppId
   const openCurrentPreview = () => setPreviewSchema({
     title: schemaName || 'Registration Form',
@@ -200,10 +197,10 @@ export default function RegistrationBuilderPage() {
         <OrgTopbar heading="Registration Page Schema" action={<button type="button" className="secondary-button" onClick={() => setView('organization-dashboard')}>Back to Dashboard</button>} />
         <section className="org-console-content builder-console-content">
           <div className="schema-builder-header">
-            <div><span className="eyebrow">Application schema</span><h2>Registration Page Builder</h2><p>Design the registration fields used by one approved application.</p><span className="status-pill-ui status-pending builder-approval-pill"><AdminIcon name="pending" />Platform approval required</span></div>
-            <div className="schema-builder-actions"><button className="secondary-button icon-text-button" disabled={saving} onClick={() => submitSchema(false)}><AdminIcon name="schema" />Save Draft</button><button className="primary-button icon-text-button" disabled={saving} onClick={() => submitSchema(true)}><AdminIcon name="check" />Submit for Approval</button><button className="secondary-button icon-text-button" onClick={openCurrentPreview}><AdminIcon name="view" />Registration Form Preview</button></div>
+            <div><span className="eyebrow">Application schema</span><h2>Registration Page Builder</h2><p>Design the registration fields used by one active application.</p><span className="status-pill-ui status-approved builder-approval-pill"><AdminIcon name="check" />Self-hosted publishing</span></div>
+            <div className="schema-builder-actions"><button className="secondary-button icon-text-button" disabled={saving} onClick={() => submitSchema(false)}><AdminIcon name="schema" />Save Draft</button><button className="primary-button icon-text-button" disabled={saving} onClick={() => submitSchema(true)}><AdminIcon name="check" />Publish</button><button className="secondary-button icon-text-button" onClick={openCurrentPreview}><AdminIcon name="view" />Registration Form Preview</button></div>
           </div>
-          {!orgApps.length && <div className="builder-message warning">No approved application is available. Approve an application first, then create its registration schema.</div>}
+          {!orgApps.length && <div className="builder-message warning">No active application is available. Register an application first, then create its registration schema.</div>}
           <div className="schema-config-strip">
             <label>Application<select value={selectedAppId} onChange={(event) => setSelectedAppId(event.target.value)}><option value="">Select application</option>{orgApps.map((app) => <option key={app.id} value={app.id}>{app.name} - {app.id}</option>)}</select></label>
             <label>Schema Name<input value={schemaName} onChange={(event) => setSchemaName(event.target.value)} /></label>
@@ -271,15 +268,14 @@ export default function RegistrationBuilderPage() {
             </div>
           </div>
           <section className="schema-history-panel">
-            <div className="panel-heading"><h3>Registration Schemas</h3><span>{historyLoading ? 'Loading versions...' : `${schemaHistory.length} versions`}</span></div>
-            <div className="tab-row">{filters.map((filter) => <button key={filter} type="button" className={`tab ${statusFilter === filter ? 'active' : ''}`} onClick={() => setStatusFilter(filter)}>{filter}</button>)}</div>
+            <div className="panel-heading"><h3>Registration Schemas</h3><span>{historyLoading ? 'Loading versions...' : `${registrationSchemas.length} versions`}</span></div>
             <div className="schema-status-list">
-              {filteredRegistrationSchemas.length ? filteredRegistrationSchemas.map((schema: any) => (
+              {registrationSchemas.length ? registrationSchemas.map((schema: any) => (
                 <article key={schema.versionId || schema.id} className="schema-status-card">
                   <div><div className="approval-name-row"><strong>{schema.name}</strong><span className={`status-pill-ui status-${schema.status}`}><AdminIcon name={schema.status === 'approved' ? 'check' : schema.status === 'rejected' ? 'rejected' : 'pending'} />{schema.status}</span></div><p>{schema.appName || schema.appId || 'Application'} - Version {schema.versionNumber || 1}{schema.changeSummary ? ` - ${schema.changeSummary}` : ''}</p></div>
                   <div className="schema-card-actions"><button type="button" className="ghost-button icon-text-button" onClick={() => openHistoryPreview(schema)}><AdminIcon name="view" />Preview Form</button><small>{schema.createdAt}</small></div>
                 </article>
-              )) : <div className="empty-state">No registration schemas found for this filter.</div>}
+              )) : <div className="empty-state">No registration schemas found for this application.</div>}
             </div>
           </section>
         </section>

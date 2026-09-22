@@ -46,6 +46,32 @@ const getServiceUrls = (path: string) => {
   return urls
 }
 
+const HOSTED_ADMIN_TOKEN_KEY = 'identity_os_hosted_admin_token'
+const HOSTED_ADMIN_CLIENT_ID_KEY = 'identity_os_hosted_admin_client_id'
+
+const decodeJwtPayload = (token?: string | null) => {
+  if (!token) return null
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
+    return JSON.parse(window.atob(padded))
+  } catch {
+    return null
+  }
+}
+
+const hasRealmRole = (tokenPayload: any, role: string) => {
+  const roles = tokenPayload?.realm_access?.roles
+  return Array.isArray(roles) && roles.includes(role)
+}
+
+const getHostedAdminToken = () => {
+  if (typeof window === 'undefined') return ''
+  return readStorage(HOSTED_ADMIN_TOKEN_KEY) || ''
+}
+
 const hasProfileDetails = (org: Organization | null) =>
   Boolean(
     org?.representative?.name ||
@@ -64,11 +90,12 @@ const backendRequest = async <TResponse,>(path: string, init?: RequestInit): Pro
   if (keycloak.authenticated) {
     await keycloak.updateToken(30)
   }
+  const hostedAdminToken = !keycloak.token ? getHostedAdminToken() : ''
   const requestInit = {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(keycloak.token ? { Authorization: `Bearer ${keycloak.token}` } : {}),
+      ...(keycloak.token ? { Authorization: `Bearer ${keycloak.token}` } : hostedAdminToken ? { Authorization: `Bearer ${hostedAdminToken}` } : {}),
       ...init?.headers,
     },
   }
@@ -165,6 +192,13 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
   const [orgLoginError, setOrgLoginError] = useState('')
   const [orgLoginMaskedEmail, setOrgLoginMaskedEmail] = useState('')
   const [authenticatedOrgId, setAuthenticatedOrgId] = useState('')
+  const [hostedAdminClientId, setHostedAdminClientId] = useState(() => {
+    try {
+      return readStorage(HOSTED_ADMIN_CLIENT_ID_KEY) || ''
+    } catch {
+      return ''
+    }
+  })
   const [authenticatedOrgProfile, setAuthenticatedOrgProfile] = useState<Organization | null>(null)
   const [successData, setSuccessData] = useState<{ orgId: string; createdAt: string; status: string; officialEmail?: string } | null>(() => {
     try {
@@ -203,12 +237,15 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
 
   const currentOrg = useMemo(() => {
     if (authenticatedOrgProfile) return authenticatedOrgProfile
-    const effectiveOrgId = authenticatedOrgId || orgLoginId
+    const hostedApp = hostedAdminClientId
+      ? applications.find((app) => app.id === hostedAdminClientId || app.clientId === hostedAdminClientId)
+      : null
+    const effectiveOrgId = authenticatedOrgId || hostedApp?.orgId || orgLoginId
     if (!effectiveOrgId) return null
     const savedOrg = organizations.find((org) => org.id === effectiveOrgId)
     const approvedOrg = approvedOrganizations.find((org) => org.id === effectiveOrgId)
     return savedOrg && approvedOrg ? { ...savedOrg, ...approvedOrg } : savedOrg || approvedOrg || null
-  }, [authenticatedOrgId, authenticatedOrgProfile, approvedOrganizations, organizations, orgLoginId])
+  }, [applications, authenticatedOrgId, authenticatedOrgProfile, approvedOrganizations, hostedAdminClientId, organizations, orgLoginId])
 
   const mapOrganizationProfile = (profile: any): Organization => {
     const representativeName = [profile.representativeFirstName, profile.representativeLastName].filter(Boolean).join(' ').trim()
@@ -370,6 +407,15 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
     return refreshPromise
   }
 
+  useEffect(() => {
+    if (!hostedAdminClientId || authenticatedOrgId) return
+    const hostedApp = applications.find((app) => app.id === hostedAdminClientId || app.clientId === hostedAdminClientId)
+    if (!hostedApp?.orgId) return
+    setAuthenticatedOrgId(hostedApp.orgId)
+    setOrgLoginId(hostedApp.orgId)
+    writeStorage('catalogue_active_org_id_v1', hostedApp.orgId)
+  }, [applications, authenticatedOrgId, hostedAdminClientId])
+
   const loadIdentitySchemaVersions = async (organizationId: string, schemaType?: 'REGISTRATION' | 'LOGIN') => {
     if (!organizationId) return []
     const query = schemaType ? `?schemaType=${encodeURIComponent(schemaType)}` : ''
@@ -378,9 +424,36 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const hostedAdminToken = params.get('hosted_admin_token') || getHostedAdminToken()
+    const hostedClientId = params.get('client_id') || readStorage(HOSTED_ADMIN_CLIENT_ID_KEY) || ''
+    const hostedAdminPayload = decodeJwtPayload(hostedAdminToken)
+    if (hostedAdminToken && hasRealmRole(hostedAdminPayload, 'APPLICATION_SUPER_ADMIN')) {
+      writeStorage(HOSTED_ADMIN_TOKEN_KEY, hostedAdminToken)
+      if (hostedClientId) {
+        writeStorage(HOSTED_ADMIN_CLIENT_ID_KEY, hostedClientId)
+        setHostedAdminClientId(hostedClientId)
+      }
+      if (hostedAdminPayload?.organization_id) {
+        setAuthenticatedOrgId(hostedAdminPayload.organization_id)
+        setOrgLoginId(hostedAdminPayload.organization_id)
+        writeStorage('catalogue_active_org_id_v1', hostedAdminPayload.organization_id)
+      }
+      if (params.has('hosted_admin_token')) {
+        params.delete('hosted_admin_token')
+        params.delete('client_id')
+        const query = params.toString()
+        window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+      }
+      refreshCatalogueData()
+      if (hostedAdminPayload?.organization_id) return
+    }
+
     const tokenOrgId = keycloak.tokenParsed?.organization_id as string | undefined
     const username = keycloak.tokenParsed?.preferred_username as string | undefined
-    const nextOrgId = tokenOrgId || (keycloak.hasRealmRole?.('ORGANISATION_ADMIN') ? username : '')
+    const hasAdminRole = keycloak.hasRealmRole?.('ORGANISATION_ADMIN') || keycloak.hasRealmRole?.('APPLICATION_SUPER_ADMIN')
+    const nextOrgId = tokenOrgId || (hasAdminRole ? username : '')
     if (!keycloak.authenticated || !nextOrgId) return
 
     setAuthenticatedOrgId(nextOrgId)
@@ -516,27 +589,29 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
       const nextSuccessData = {
         orgId: data.organizationId,
         createdAt: new Date().toLocaleString(),
-        status: 'Admin credentials sent',
+        status: 'Active',
         officialEmail: registrationForm.email,
       }
       setSuccessData(nextSuccessData)
       writeStorage('catalogue_last_registration_v1', JSON.stringify(nextSuccessData))
-      const newPendingOrg: Organization = {
+      const newApprovedOrg: Organization = {
         id: data.organizationId,
         name: registrationForm.name,
         type: registrationForm.type,
         country: registrationForm.country,
         email: registrationForm.email,
         phone: registrationForm.phone,
-        status: 'pending',
+        status: 'approved',
         registrationType: registrationForm.registrationIdType,
         registrationDetails: { registrationNumber: registrationForm.gst, gst: registrationForm.gst, authority: registrationForm.registrationAuthority },
         representative: { name: registrationForm.repName, email: registrationForm.repEmail, mobile: registrationForm.repMobile, designation: registrationForm.designation },
         address: [registrationForm.address, registrationForm.addressLine2, registrationForm.city, registrationForm.state, registrationForm.postalCode].filter(Boolean).join(', '),
         submittedAt: new Date().toLocaleString(),
+        approvedAt: new Date().toLocaleString(),
       }
-      setOrganizations((prev) => [newPendingOrg, ...prev.filter((org) => org.id !== newPendingOrg.id)])
-      setPendingOrganizations((prev) => [newPendingOrg, ...prev.filter((org) => org.id !== newPendingOrg.id)])
+      setOrganizations((prev) => [newApprovedOrg, ...prev.filter((org) => org.id !== newApprovedOrg.id)])
+      setPendingOrganizations((prev) => prev.filter((org) => org.id !== newApprovedOrg.id))
+      setApprovedOrganizations((prev) => [newApprovedOrg, ...prev.filter((org) => org.id !== newApprovedOrg.id)])
       setView('success')
       setStep(0)
     } catch (error) {
@@ -621,7 +696,7 @@ export function CatalogueProvider({ children, initialView = 'home' }: CatalogueP
     })
     const mappedApp = { ...mapBackendApplication(app), orgName: currentOrg?.name || app.organizationName || orgId }
     setApplications((prev) => [mappedApp, ...prev])
-    addAudit('Submit Application', `Submitted application ${mappedApp.name} for approval`)
+    addAudit('Register Application', `Registered application ${mappedApp.name}`)
     setRegisterAppForm({ name:'', type:'web', description:'', contactEmail:'', domain:'', redirectUri:'', logoutUri:'' })
     setRegisterAppModal(false)
     return mappedApp

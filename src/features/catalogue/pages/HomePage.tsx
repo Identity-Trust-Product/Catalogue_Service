@@ -35,31 +35,12 @@
 
 'use client'
 
-
-import keycloak from '../../../lib/keycloak'
 import { useCatalogue } from '../context/CatalogueContext'
-import { ShieldCheck, Building2, UserCog } from 'lucide-react'
+import { Building2, UserCog } from 'lucide-react'
 
 
 export default function HomePage() {
   const { setView } = useCatalogue()
-
-  const handlePlatformAdminLogin = async () => {
-    console.log('Platform Admin button clicked')
-
-    try {
-      console.log('Keycloak authenticated:', keycloak.authenticated)
-
-      await keycloak.login({
-        redirectUri: `${window.location.origin}/platform/dashboard`,
-      })
-
-      console.log('keycloak.login() called')
-    } catch (error) {
-      console.error('Platform Admin login failed:', error)
-    }
-  }
-
 
   return (
     <div className="home-screen">
@@ -103,30 +84,6 @@ export default function HomePage() {
 
             <span className="role-card-action">
               Start Registration <span>-&gt;</span>
-            </span>
-          </button>
-
-
-          {/* Platform Admin */}
-          <button
-            type="button"
-            className="role-card admin-card"
-            onClick={handlePlatformAdminLogin}
-          >
-            {/* <span className="role-icon role-icon-purple">PA</span> */}
-            <span className="role-icon role-icon-purple">
-              <ShieldCheck size={28} strokeWidth={2} />
-            </span>
-            <span className="role-card-title">
-              Platform Admin
-            </span>
-
-            <span className="role-card-subtitle">
-              Review organizations, apps &amp; schemas
-            </span>
-
-            <span className="role-card-action">
-              Admin Login <span>-&gt;</span>
             </span>
           </button>
 

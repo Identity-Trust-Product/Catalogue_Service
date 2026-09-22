@@ -13,10 +13,10 @@ interface OrgTopbarProps {
 }
 
 export default function OrgTopbar({ heading, subtitle, action }: OrgTopbarProps) {
-  const { currentOrg, orgLoginId, setView } = useCatalogue()
+  const { currentOrg } = useCatalogue()
   const [profileOpen, setProfileOpen] = useState(false)
-  const organizationId = currentOrg?.id || orgLoginId || 'Organization'
-  const initials = (currentOrg?.name || organizationId).split(/[ _-]/).filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
+  const displayName = currentOrg?.name || 'Identity OS'
+  const initials = displayName.split(/[ _-]/).filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
 
   const handleLogout = async () => {
     await logoutFromKeycloak()
@@ -33,8 +33,8 @@ export default function OrgTopbar({ heading, subtitle, action }: OrgTopbarProps)
         {action}
         <button type="button" className="icon-button" title="Notifications"><AdminIcon name="notifications" /><span className="notification-dot" /></button>
         <div className="profile-menu">
-          <button type="button" className="profile-trigger" onClick={() => setProfileOpen((open) => !open)}><span>{initials}</span><strong>{organizationId}</strong></button>
-          {profileOpen && <div className="profile-dropdown"><button type="button" onClick={() => setView('org-profile')}>Organization Profile</button><button type="button" onClick={handleLogout}>Log Out</button></div>}
+          <button type="button" className="profile-trigger" onClick={() => setProfileOpen((open) => !open)}><span>{initials}</span><strong>Admin</strong></button>
+          {profileOpen && <div className="profile-dropdown"><button type="button" onClick={handleLogout}>Log Out</button></div>}
         </div>
       </div>
     </header>
