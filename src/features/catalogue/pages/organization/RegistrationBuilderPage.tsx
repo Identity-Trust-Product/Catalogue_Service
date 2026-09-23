@@ -29,6 +29,15 @@ const normalizePreviewFields = (fields: Array<string | RegistrationField>): Regi
     : field)
 
 const normalizeFieldName = (value?: string) => (value || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+const requiresOtpVerification = (field?: RegistrationField) => {
+  if (!field) return false
+  const fieldName = normalizeFieldName(field.name)
+  const labelName = normalizeFieldName(field.label)
+  return field.type === 'email'
+    || field.type === 'phone'
+    || ['email', 'phone', 'phone_number', 'mobile', 'mobile_number', 'aadhaar', 'aadhar'].includes(fieldName)
+    || ['email', 'phone', 'phone_number', 'mobile', 'mobile_number', 'aadhaar', 'aadhar'].includes(labelName)
+}
 
 const isSensitiveField = (field?: RegistrationField) => {
   if (!field) return false
@@ -45,6 +54,9 @@ const sanitizeFieldForSchema = (field: RegistrationField): RegistrationField => 
   const cleanField: RegistrationField = {
     ...field,
     name: normalizeFieldName(field.name) || field.name,
+  }
+  if (requiresOtpVerification(cleanField)) {
+    cleanField.verification = 'OTP'
   }
   if (!isSensitiveField(cleanField) && !cleanField.dpdp?.sensitive) {
     delete cleanField.dpdp
@@ -85,7 +97,7 @@ const renderPreviewControl = (field: RegistrationField) => {
     return <input type="file" disabled />
   }
   const inputType = field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : field.type === 'date' ? 'date' : field.type === 'password' ? 'password' : 'text'
-  return <input type={inputType} placeholder={label} disabled />
+  return <div className={requiresOtpVerification(field) ? 'preview-verify-control' : ''}><input type={inputType} placeholder={label} disabled />{requiresOtpVerification(field) && <button type="button" disabled>Verify</button>}</div>
 }
 
 export default function RegistrationBuilderPage() {
@@ -232,12 +244,13 @@ export default function RegistrationBuilderPage() {
                           <span className="field-type-chip">{(field.type || 'text').toUpperCase()}</span>
                         </span>
                       </div>
-                      {field.type === 'dropdown' ? <select>{(field.options || ['Option 1']).map((option, optionIndex) => <option key={optionIndex}>{option}</option>)}</select> : field.type === 'checkbox' ? <input type="checkbox" /> : <input placeholder={field.label} />}
+                      {field.type === 'dropdown' ? <select>{(field.options || ['Option 1']).map((option, optionIndex) => <option key={optionIndex}>{option}</option>)}</select> : field.type === 'checkbox' ? <input type="checkbox" /> : <div className={requiresOtpVerification(field) ? 'preview-verify-control' : ''}><input placeholder={field.label} />{requiresOtpVerification(field) && <button type="button">Verify</button>}</div>}
                       {isSensitiveField(field) && <div className="field-dpdp-preview">
                         <span>{field.dpdp?.purpose || 'Purpose missing'}</span>
                         <span>{field.dpdp?.retentionDays || 'Retention missing'} days</span>
                         <span>{field.dpdp?.consentRequired ? 'Consent required' : 'Consent missing'}</span>
                       </div>}
+                      {requiresOtpVerification(field) && <div className="field-dpdp-preview"><span>OTP verification required</span></div>}
                     </div>
                   </div>
                 ))}

@@ -75,7 +75,7 @@ const auditConsentNotice = async ({
         isoTime: new Date().toISOString(),
       }),
     })
-  } catch {
+  } catch (error) {
     console.error('Consent notice audit was not recorded:', error)
   }
 }
