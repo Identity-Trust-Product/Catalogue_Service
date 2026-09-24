@@ -3867,6 +3867,24 @@ textarea {
   color: #10233f;
 }
 
+.preview-verify-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.preview-verify-control button {
+  min-height: 42px;
+  border: 1px solid #b9d1ff;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #1256c5;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .registration-preview-checkbox {
   min-height: 42px;
   display: flex;
@@ -4470,6 +4488,63 @@ textarea {
 
 .hosted-form input::placeholder {
   color: #8da0b8;
+}
+
+.hosted-verify-field {
+  display: grid;
+  gap: 8px;
+}
+
+.hosted-verify-input-row,
+.hosted-otp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.hosted-verify-button,
+.hosted-otp-button {
+  min-height: 44px;
+  border: 1px solid #bdd3ff;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #1659c7;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hosted-verify-button:hover,
+.hosted-otp-button:hover {
+  border-color: #4e73df;
+  background: #e6efff;
+}
+
+.hosted-verify-button.verified {
+  border-color: #95e5c5;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.hosted-otp-row input {
+  min-height: 40px;
+}
+
+.hosted-otp-button {
+  min-height: 40px;
+  background: #4e73df;
+  color: #ffffff;
+}
+
+.hosted-verified-note {
+  color: #047857;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .hosted-submit {
