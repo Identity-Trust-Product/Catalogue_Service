@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AdminIcon } from '../../../components/ui'
 
 type HostedMode = 'register' | 'login' | 'choice'
@@ -112,7 +112,6 @@ const getLoginFields = (schema?: HostedSchema): HostedField[] => {
 const sensitiveFieldNames = new Set(['aadhaar', 'aadhar', 'pan', 'passport', 'voter_id', 'driving_license', 'biometric', 'date_of_birth', 'dob', 'address'])
 const normalizeFieldToken = (value?: string) => (value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 const verificationFieldNames = new Set(['aadhaar', 'aadhar', 'email', 'phone', 'phone_number', 'mobile', 'mobile_number'])
-const dummyOtp = '123456'
 
 const isSensitiveField = (field: HostedField) => {
   const fieldName = normalizeFieldToken(field.name)
@@ -129,6 +128,12 @@ const requiresOtpVerification = (field: HostedField) => {
     || verificationFieldNames.has(fieldName)
     || verificationFieldNames.has(labelName)
   )
+}
+
+const usesBackendEmailOtp = (field: HostedField) => {
+  const fieldName = normalizeFieldToken(field.name)
+  const labelName = normalizeFieldToken(field.label)
+  return field.type === 'email' || fieldName === 'email' || labelName === 'email'
 }
 
 const getConsentRequiredFields = (schema: HostedSchema | undefined, fields: HostedField[]) => {
@@ -216,6 +221,14 @@ const hostedIdentityRequest = async (path: string, body: Record<string, unknown>
   throw lastError instanceof Error ? lastError : new Error('Identity OS request failed.')
 }
 
+const hostedVerificationRequest = async (path: string, body: Record<string, unknown>) => {
+  const data = await hostedIdentityRequest(path, body)
+  if (!data.success) {
+    throw new Error(data.message || 'Verification failed.')
+  }
+  return data
+}
+
 const describeError = (value: any): string => {
   if (!value) return ''
   if (typeof value === 'string') return value
@@ -268,7 +281,9 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
   const [consentSubmitting, setConsentSubmitting] = useState(false)
   const [consentGranted, setConsentGranted] = useState(false)
   const [consentPrincipal, setConsentPrincipal] = useState('')
-  const [otpState, setOtpState] = useState<Record<string, { sent?: boolean; verified?: boolean; otp?: string; value?: string }>>({})
+  const [otpState, setOtpState] = useState<Record<string, { sent?: boolean; sending?: boolean; verifying?: boolean; verified?: boolean; otp?: string; value?: string; verificationId?: string }>>({})
+  const otpRequestLocks = useRef<Record<string, boolean>>({})
+  const otpVerifyLocks = useRef<Record<string, boolean>>({})
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -329,6 +344,7 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
     : ''
   const pendingConsentPrincipalKey = `${schemaConsentKey}:pending-principal`
   const registrationDraftKey = `identity_registration_draft:${clientId}`
+  const registrationVerificationDraftKey = `identity_registration_verification:${clientId}`
   const schemaMissing = Boolean(app && currentMode === 'register' && !registrationSchema) || Boolean(app && currentMode === 'login' && !loginSchema)
   const fieldsMissing = Boolean(app && currentMode === 'login' && loginSchema && fields.length === 0)
   const authSwitchUrl = buildHostedFlowUrl(currentMode === 'register' ? 'login' : 'register', clientId, callbackUri)
@@ -338,7 +354,9 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
     if (currentMode !== 'register' || !clientId || !registrationSchema) return
     try {
       const storedDraft = sessionStorage.getItem(registrationDraftKey)
-      if (storedDraft) setFormValues((prev) => ({ ...JSON.parse(storedDraft), ...prev }))
+      if (storedDraft) setFormValues((prev) => ({ ...prev, ...JSON.parse(storedDraft) }))
+      const storedVerificationDraft = sessionStorage.getItem(registrationVerificationDraftKey)
+      if (storedVerificationDraft) setOtpState((prev) => ({ ...prev, ...JSON.parse(storedVerificationDraft) }))
       const params = new URLSearchParams(window.location.search)
       const returnedFromConsent = params.get('cmp_consent') === 'granted'
       if (returnedFromConsent) {
@@ -357,24 +375,48 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
       setConsentGranted(false)
       setConsentPrincipal('')
     }
-  }, [clientId, currentMode, pendingConsentPrincipalKey, registrationDraftKey, registrationSchema, schemaConsentKey])
+  }, [clientId, currentMode, pendingConsentPrincipalKey, registrationDraftKey, registrationSchema, registrationVerificationDraftKey, schemaConsentKey])
 
   const updateField = (name: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [name]: value }))
     setOtpState((prev) => prev[name]?.verified && prev[name]?.value !== value ? { ...prev, [name]: { sent: false, verified: false, otp: '', value } } : prev)
   }
-  const sendDummyOtp = (field: HostedField) => {
+  const sendDummyOtp = async (field: HostedField) => {
     const value = String(formValues[field.name] || '').trim()
     if (!value) {
       setMessageTone('error')
       setMessage(`Enter ${field.label || field.name} before verification.`)
       return
     }
-    setOtpState((prev) => ({ ...prev, [field.name]: { sent: true, verified: false, otp: '', value } }))
-    setMessageTone('success')
-    setMessage(`Dummy OTP sent for ${field.label || field.name}. Use ${dummyOtp}.`)
+    if (otpRequestLocks.current[field.name] || otpState[field.name]?.sending) return
+    otpRequestLocks.current[field.name] = true
+    setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), sending: true, value } }))
+    if (!usesBackendEmailOtp(field)) {
+      setOtpState((prev) => ({ ...prev, [field.name]: { sent: true, sending: false, verified: false, otp: '', value } }))
+      setMessageTone('success')
+      setMessage(`Dummy OTP generated for ${field.label || field.name}. Use 123456.`)
+      otpRequestLocks.current[field.name] = false
+      return
+    }
+    try {
+      const data = await hostedVerificationRequest('/api/v1/onboarding/identity/verification/otp/request', {
+        clientId,
+        fieldName: field.name,
+        fieldType: canonicalFieldName(field) || field.type || field.name,
+        value,
+      })
+      setOtpState((prev) => ({ ...prev, [field.name]: { sent: true, sending: false, verified: false, otp: '', value, verificationId: data.verificationId } }))
+      setMessageTone('success')
+      setMessage(data.message || `OTP sent for ${field.label || field.name}.`)
+    } catch (error) {
+      setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), sending: false, value } }))
+      setMessageTone('error')
+      setMessage(error instanceof Error ? error.message : 'Unable to send OTP.')
+    } finally {
+      otpRequestLocks.current[field.name] = false
+    }
   }
-  const verifyDummyOtp = (field: HostedField) => {
+  const verifyDummyOtp = async (field: HostedField) => {
     const state = otpState[field.name]
     const currentValue = String(formValues[field.name] || '').trim()
     if (!state?.sent || state.value !== currentValue) {
@@ -382,14 +424,41 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
       setMessage(`Generate OTP again for ${field.label || field.name}.`)
       return
     }
-    if (state.otp !== dummyOtp) {
-      setMessageTone('error')
-      setMessage('Invalid OTP. Use 123456 for now.')
+    if (otpVerifyLocks.current[field.name] || state.verifying) return
+    otpVerifyLocks.current[field.name] = true
+    setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), verifying: true } }))
+    if (!usesBackendEmailOtp(field)) {
+      if ((state.otp || '').trim() !== '123456') {
+        setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), verifying: false } }))
+        setMessageTone('error')
+        setMessage('Invalid OTP. Use 123456 for this verification.')
+        otpVerifyLocks.current[field.name] = false
+        return
+      }
+      setOtpState((prev) => ({ ...prev, [field.name]: { ...state, verifying: false, verified: true, value: currentValue } }))
+      setMessageTone('success')
+      setMessage(`${field.label || field.name} verified successfully.`)
+      otpVerifyLocks.current[field.name] = false
       return
     }
-    setOtpState((prev) => ({ ...prev, [field.name]: { ...state, verified: true, value: currentValue } }))
-    setMessageTone('success')
-    setMessage(`${field.label || field.name} verified successfully.`)
+    try {
+      const data = await hostedVerificationRequest('/api/v1/onboarding/identity/verification/otp/verify', {
+        clientId,
+        fieldName: field.name,
+        value: currentValue,
+        otp: state.otp || '',
+        verificationId: state.verificationId || '',
+      })
+      setOtpState((prev) => ({ ...prev, [field.name]: { ...state, verifying: false, verified: true, value: currentValue } }))
+      setMessageTone('success')
+      setMessage(data.message || `${field.label || field.name} verified successfully.`)
+    } catch (error) {
+      setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), verifying: false } }))
+      setMessageTone('error')
+      setMessage(error instanceof Error ? error.message : 'Invalid OTP.')
+    } finally {
+      otpVerifyLocks.current[field.name] = false
+    }
   }
   const giveConsent = async () => {
     if (!app || !callbackUri) return
@@ -404,6 +473,7 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
     setMessage('')
     try {
       sessionStorage.setItem(registrationDraftKey, JSON.stringify(formValues))
+      sessionStorage.setItem(registrationVerificationDraftKey, JSON.stringify(otpState))
       sessionStorage.setItem(pendingConsentPrincipalKey, dataPrincipalId)
       const noticeUrl = await createConsentNotice({
         clientId,
@@ -460,10 +530,20 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
       const username = submittedFields.username || submittedFields.email || submittedFields.mobile || ''
 
       if (currentMode === 'register') {
+        const verificationStatus = otpFields.reduce<Record<string, { verified: boolean; method: string; verifiedAt?: string }>>((acc, field) => {
+          const state = otpState[field.name]
+          acc[field.name] = {
+            verified: Boolean(state?.verified && state.value === formValues[field.name]),
+            method: 'OTP',
+            verifiedAt: state?.verified ? new Date().toISOString() : undefined,
+          }
+          return acc
+        }, {})
         await hostedIdentityRequest('/api/v1/onboarding/identity/register', {
           clientId,
           redirectUri: callbackUri,
           fields: submittedFields,
+          verificationStatus,
         })
         setFormValues({})
         setConsentGranted(false)
@@ -471,6 +551,7 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
         setMessageTone('success')
         setMessage('Registration completed successfully. You can now login with this username and password.')
         sessionStorage.removeItem(registrationDraftKey)
+        sessionStorage.removeItem(registrationVerificationDraftKey)
         sessionStorage.removeItem(pendingConsentPrincipalKey)
         sessionStorage.removeItem(schemaConsentKey)
         const url = new URL(window.location.href)
@@ -546,13 +627,13 @@ export default function HostedIdentityPage({ initialClientId = '', initialRedire
                     ? <div className="hosted-verify-field">
                         <div className="hosted-verify-input-row">
                           <input type={field.type === 'email' ? 'email' : 'text'} value={formValues[field.name] || ''} onChange={(event) => updateField(field.name, event.target.value)} placeholder={field.label || field.name} />
-                          <button type="button" className={otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] ? 'hosted-verify-button verified' : 'hosted-verify-button'} onClick={() => sendDummyOtp(field)}>{otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] ? 'Verified' : 'Verify'}</button>
+                          <button type="button" disabled={otpState[field.name]?.sending} className={otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] ? 'hosted-verify-button verified' : 'hosted-verify-button'} onClick={() => sendDummyOtp(field)}>{otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] ? 'Verified' : otpState[field.name]?.sending ? 'Sending...' : 'Verify'}</button>
                         </div>
                         {otpState[field.name]?.sent && !(otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name]) && <div className="hosted-otp-row">
                           <input inputMode="numeric" maxLength={6} value={otpState[field.name]?.otp || ''} onChange={(event) => setOtpState((prev) => ({ ...prev, [field.name]: { ...(prev[field.name] || {}), otp: event.target.value.replace(/\D/g, '').slice(0, 6) } }))} placeholder="Enter OTP" />
-                          <button type="button" className="hosted-otp-button" onClick={() => verifyDummyOtp(field)}>Submit OTP</button>
+                          <button type="button" disabled={otpState[field.name]?.verifying} className="hosted-otp-button" onClick={() => verifyDummyOtp(field)}>{otpState[field.name]?.verifying ? 'Verifying...' : 'Submit OTP'}</button>
                         </div>}
-                        {otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] && <small className="hosted-verified-note">Verified with dummy OTP</small>}
+                        {otpState[field.name]?.verified && otpState[field.name]?.value === formValues[field.name] && <small className="hosted-verified-note">Verified with OTP</small>}
                       </div>
                     : <input type={field.type === 'password' ? 'password' : field.type === 'email' ? 'email' : 'text'} value={formValues[field.name] || ''} onChange={(event) => updateField(field.name, event.target.value)} placeholder={field.label || field.name} />}
             </label>
